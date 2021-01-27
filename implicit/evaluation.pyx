@@ -9,6 +9,7 @@ from scipy.sparse import coo_matrix, csr_matrix
 from tqdm.auto import tqdm
 
 from libc.math cimport fmin
+from libc.math cimport fmin, fmax
 from libc.stdlib cimport free, malloc
 from libc.string cimport memset
 from libcpp.unordered_set cimport unordered_set
@@ -222,9 +223,10 @@ def ranking_metrics_at_k(model, train_user_items, test_user_items, int K=10,
     cdef int users = test_user_items.shape[0], items = test_user_items.shape[1]
     cdef int u, i
     # precision
-    cdef double relevant = 0, pr_div = 0, pr_div_correct = 0, rec_div_correct = 0, total = 0
+    cdef double relevant = 0, pr_div = 0, total = 0
+    cdef double relevant = 0, pr_div = 0, rec_div = 0, total = 0
     # map
-    cdef double mean_ap = 0, mean_ap_correct = 0, ap = 0
+    cdef double mean_ap = 0, ap = 0
     # ndcg
     cdef double[:] cg = (1.0 / np.log2(np.arange(2, K + 2)))
     cdef double[:] cg_sum = np.cumsum(cg)
@@ -265,8 +267,11 @@ def ranking_metrics_at_k(model, train_user_items, test_user_items, int K=10,
                     likes.insert(test_indices[i])
 
                 pr_div += fmin(K, likes.size())
-                pr_div_correct += K
-                rec_div_correct += likes.size()
+                if(likes.size() == 0):
+                    break
+
+                pr_div += K
+                rec_div += likes.size()
                 ap = 0
                 hit = 0
                 miss = 0
@@ -286,7 +291,7 @@ def ranking_metrics_at_k(model, train_user_items, test_user_items, int K=10,
                         auc += hit
                 auc += ((hit + num_pos_items) / 2.0) * (num_neg_items - miss)
                 mean_ap += ap / fmin(K, likes.size())
-                mean_ap_correct += ap / K
+                mean_ap += ap / fmax(1, hit)
                 mean_auc += auc / (num_pos_items * num_neg_items)
                 total += 1
         finally:
@@ -296,10 +301,9 @@ def ranking_metrics_at_k(model, train_user_items, test_user_items, int K=10,
     progress.close()
     return {
         "precision": relevant / pr_div,
+        "recall": relevant / rec_div,
         "map": mean_ap / total,
         "ndcg": ndcg / total,
+        "auc": mean_auc / total
         "auc": mean_auc / total,
-        "precision_correct": relevant / pr_div_correct,
-        "recall_correct": relevant / rec_div_correct,
-        "map_correct": mean_ap_correct / total
     }
